@@ -20,22 +20,33 @@ logger = logging.getLogger(__name__)
 
 
 # Static functions drawing samples:
-def draw_gh(n,variance):
+def draw_gh(n,variance,seed=None):
+	if seed:
+		np.random.seed(seed)
 	temp = stats.truncnorm.rvs(0.5,2,scale=np.sqrt(variance),size=n)
 	return temp/sum(temp)
 
-def draw_ph(n,loc,variance):
+def draw_ph(n,loc,variance,seed=None):
+	if seed:
+		np.random.seed(seed)
 	return np.random.normal(loc,np.sqrt(variance),n)
 
-def draw_gh_ph(n,loc,variance_p,variance_g,corr):
-	gh = draw_gh(n,variance_g)
-	gh_var = np.var(gh)
-	beta_ = corr*variance_p
-	mu = loc-beta_*np.mean(gh)
-	var_epsilon = variance_p-beta_**2*gh_var
-	ph = mu+beta_*gh+np.random.normal(0,np.sqrt(var_epsilon),n)
-	return ph,gh
+def draw_gh_ph(n,loc,variance_p,variance_g,corr,seed=None):
+	if seed:
+		np.random.seed(seed)
+	gh = draw_gh(n,variance_g,seed)
+	gh_std = np.sqrt(np.var(gh))
+	beta_f = lambda var_p: corr*np.sqrt(var_p)/gh_std
+	eps_std_f= lambda var_p: np.sqrt(var_p-beta_f(var_p)**2*gh_std**2)
+	epsh_f = lambda var_p: np.random.normal(0,eps_std_f(var_p),n)
+	ph_f = lambda var_p: loc+beta_f(var_p)*(gh-1/n)+epsh_f(var_p)
+	eps_std = eps_std_f(variance_p)
+	epsh = epsh_f(variance_p)
+	ph = ph_f(variance_p)
+	return ph,gh,epsh,gh_std,eps_std
 
+# def update_ph(n,loc,variance_p,corr,gh,gh_std,epsh,varp_new):
+# 	stats.normal.cdf()
 
 class Logit:
 	"""
@@ -53,13 +64,14 @@ class Logit:
 		self.sigma = 10
 		self.upper = 2
 		self.lower = 0
-		self.eps = 0 # increase numerical stability of unbounded functions, e.g. log().
+		self.eps = 0 # increase (>=0) for numerical stability of unbounded functions, e.g. log().
 
 		self.n=8760
 		self.loc=200
-		self.variance_p=100
-		self.variance_g=10
-		self.corr=0
+		self.variance_p=1
+		self.variance_g=1
+		self.corr=0.1
+		self.seed=30
 		self.utils()
 
 	def utils(self):
@@ -139,15 +151,42 @@ class Logit:
 	# Sample functions:
 	def draw_g(self,ph=None):
 		if ph:
-			self.gh = draw_gh(len(ph),self.variance_g)
+			self.gh = draw_gh(len(ph),self.variance_g,self.seed)
 		else:
-			self.gh = draw_gh(self.n,self.variance_g)
+			self.gh = draw_gh(self.n,self.variance_g,self.seed)
 
 	def draw_p(self,gh=None):
 		if gh:
-			self.ph = draw_ph(len(gh),self.loc,self.variance_p)
+			self.ph = draw_ph(len(gh),self.loc,self.variance_p,self.seed)
 		else:
-			self.ph = draw_ph(self.n,self.loc,self.variance_p)
+			self.ph = draw_ph(self.n,self.loc,self.variance_p,self.seed)
 
 	def sample(self):
-		self.ph,self.gh = draw_gh_ph(self.n,self.loc,self.variance_p,self.variance_g,self.corr)
+		self.ph,self.gh,self.epsh,self.gh_std,self.eps_std = draw_gh_ph(self.n,self.loc,self.variance_p,self.variance_g,self.corr,self.seed)
+		self.p = sum(self.ph*self.gh)
+
+	# Mean-preserving increase in volatility on existing sample:
+	# @staticmethod
+	# def linear_perturb(ph,a,p):
+	# 	return ph*(1+(ph>p)*a-(ph<p)*a)
+
+	# @staticmethod
+	# def wp(ph,gh,a,p):
+	# 	return sum(gh*Logit.linear_perturb(ph,a,p))
+
+	# @staticmethod
+	# def sample_perturbation(ph,gh,p,n,target_variance,x0=0):
+	# 	def f(x):
+	# 		return target_variance-sum((Logit.linear_perturb(ph,x,p)-Logit.wp(ph,gh,x,p))**2)/n
+	# 	return optimize.fsolve(f,x0)
+
+	def perturbed_samples(self,vec_variance):
+		try:
+			self.samples
+		except AttributeError:
+			self.samples = {}
+		self.samples['variance_p']	= vec_variance
+		self.samples['ph']			= np.empty([self.n,len(vec_variance)])
+		for i in range(len(vec_variance)):
+			self.samples['ph'][:,i] = draw_gh_ph(self.n,self.loc,vec_variance[i],self.variance_g,self.corr,self.seed)[0]
+			self.samples['ph'][:,i] = self.samples['ph'][:,i]-(sum(self.samples['ph'][:,i]*self.gh)-self.p)
