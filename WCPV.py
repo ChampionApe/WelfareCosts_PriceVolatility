@@ -55,7 +55,7 @@ class Logit:
 		self.lower = 0
 		self.eps = 0 # increase numerical stability of unbounded functions, e.g. log().
 
-		self.n=1760
+		self.n=8760
 		self.loc=200
 		self.variance_p=100
 		self.variance_g=10
