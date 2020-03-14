@@ -62,14 +62,14 @@ class Logit:
 	def base_par(self):
 		self.I = 1000
 		self.alpha = 0.5
-		self.sigma = 10
+		self.sigma = 1
 		self.upper = 2
 		self.lower = 0
 		self.eps = 0 # increase (>=0) for numerical stability of unbounded functions, e.g. log().
 
 		self.sample='ph_gh' # Allowed elements: 'ph','gh','ph_gh', None.
 		self.type='Logit' # allowed elements: Logit, MNL, GNMNL.
-		self.BPRef = 'level' # allowed elements: level, share. In Logit case, only 'level' is allowed. 
+		self.BP_Ref = 'level' # allowed elements: level, share. In Logit case, only 'level' is allowed. 
 		self.n=500
 		self.loc=200
 		self.variance_p=1
@@ -82,13 +82,31 @@ class Logit:
 		self.u_cge = lambda C,E: C**(self.alpha)*E**(1-self.alpha)
 		if hasattr(self, 'npv'):
 			if self.type=='Logit':
-				self.uhour = lambda E: Logit.staticmethod_uh(self.sigma,self.lower,self.upper,E,self.npv['Eh_l'],self.npv['Eh_u'])
-				self.uh = lambda E: self.uhour(E)-self.uhour(self.npv['Eh'])
-				self.u = lambda C,E: self.u_cge(C,sum(E))+self.uh(E)
+				self.f_uh = lambda Eh,El,Eu: (1/self.sigma)*(Eh*np.log((1-self.lower)/(self.upper-1))-(Eh-El)*np.log(Eh-El)-(Eu-Eh)*np.log(Eu-Eh))
+				self.f_uh_sum = lambda Eh: sum(self.f_uh(Eh,self.npv['Eh_l'],self.npv['Eh_u']))
+				self.f_uh_all = lambda Eh: self.f_uh_sum(Eh)+self.npv['uscale']
+				self.f_u = lambda C,Eh: self.u_cge(C,sum(Eh))+self.f_uh_all(Eh)
+				# Auxiliary functions:
 				self.utilde = lambda lambda_: np.exp(self.sigma*lambda_*(self.ph-self.npv['p']))
 				self.grad_utilde = lambda lambda_: self.sigma*(self.ph-self.npv['p'])*self.utilde(lambda_)
 				self.chi = lambda utilde: self.lower+((1-self.lower)*(self.upper-self.lower))/(1-self.lower+(self.upper-1)*utilde)
 				self.grad_chi = lambda utilde: (1-self.lower)*(self.upper-self.lower)*((1-self.lower+(self.upper-1)*utilde))**(-2)*(self.upper-1)
+				self.eh_demand = lambda lambda_,Eh: self.npv['Eh']*self.chi(self.utilde(lambda_))
+			elif self.type=='MNL':
+				self.utilde = lambda lambda_: np.exp(self.sigma*lambda_*(self.pmin-self.ph))/(sum(self.gh*np.exp(self.sigma*lambda_*(self.pmin-self.ph))))
+				if self.BP_Ref=='level':
+					self.f_uh = lambda Eh,gh: (1/self.sigma)*(Eh*np.log(gh*self.npv['E'])-Eh*(np.log(Eh)-1))
+					self.f_uh_sum = lambda Eh: sum(self.f_uh(Eh,self.gh))
+					self.f_uh_all = lambda Eh: self.f_uh_sum(Eh)+self.npv['uscale']
+					self.eh_demand = lambda lambda_,Eh: self.npv['Eh']*self.utilde(lambda_)
+				elif self.BP_Ref=='share':
+					self.f_uh_h = lambda Eh,gh: (1/self.sigma)*Eh*(np.log(gh*Eh))
+					self.f_uh_t = lambda Eh: (1/self.sigma)*sum(Eh)*np.log(sum(Eh))
+					self.f_uh_sum = lambda Eh: self.f_uh_t(Eh)+sum(self.f_uh_h(Eh,self.gh))
+					self.f_uh_all = lambda Eh: self.f_uh_sum(Eh)+self.npv['uscale']
+					self.eh_demand = lambda lambda_,Eh: self.gh*sum(Eh)*self.utilde(lambda_)
+			self.f_u = lambda C,Eh: self.u_cge(C,sum(Eh))+self.f_uh_all(Eh)
+
 
 	def upd_par(self,kwargs):
 		for key,value in kwargs.items():
@@ -101,12 +119,6 @@ class Logit:
 		self.solve_npv()
 		self.solve_fp()
 
-
-
-	@staticmethod
-	def staticmethod_uh(sigma,l,u,E,El,Eu):
-		return (1/sigma)*sum(E*np.log((1-l)/(u-1))-(E-El)*np.log(E-El)-(Eu-E)*np.log(Eu-E))
-
 	def solve_npv(self):
 		self.npv = {'C': self.alpha*self.I,
 					'p': sum(self.gh*self.ph)}
@@ -115,32 +127,32 @@ class Logit:
 		self.npv['Eh'] = self.gh*self.npv['E']
 		self.npv['Eh_l'] = self.npv['Eh']*self.lower-self.eps
 		self.npv['Eh_u'] = self.npv['Eh']*self.upper+self.eps
-		self.npv['uhour']= Logit.staticmethod_uh(self.sigma,self.lower,self.upper,self.npv['Eh'],self.npv['Eh_l'],self.npv['Eh_u'])
-		self.npv['uscale'] = -self.npv['uhour']
 		self.utils()
-		self.npv['u'] = self.u(self.npv['C'],self.npv['Eh'])
+		self.npv['uhour']= self.f_uh_sum(self.npv['Eh']) 
+		self.npv['uscale'] = -self.npv['uhour']
+		self.npv['u'] = self.f_u(self.npv['C'],self.npv['Eh'])
 
 	def solve_fp(self):
 		if not hasattr(self,'npv'):
 			self.solve_npv()
-		def f(x): # x[0] = lambda, x[1] = C, x[2:] = Eh
+		def f(x):
 			f = np.empty(len(x))
-			f[0] = x[0]-self.alpha*(x[1]/(sum(x[2:])))**(self.alpha-1) # FOC for C
+			f[0] = x[0]-self.alpha*(x[1]/(sum(x[2:])))**(self.alpha-1)
 			f[1] = self.I-x[1]-sum(self.ph*x[2:]) # Budget
-			f[2:] = x[2:]-self.npv['Eh']*self.chi(self.utilde(x[0])) # Allocation on hours
+			f[2:] = x[2:]-self.eh_demand(x[0],x[2:]) # Allocation on hours
 			return f
-		def grad(x):
-			g = np.zeros([self.n+2,self.n+2])
-			g[0,0] 	= 1
-			g[0,1] 	= self.alpha*(self.alpha-1)*x[1]**(self.alpha-2)*(sum(x[2:])**(1-self.alpha))
-			g[0,2:] = self.alpha*(1-self.alpha)*x[1]**(self.alpha-1)*(sum(x[2:])**(-self.alpha))
-			g[1,0] 	= 0
-			g[1,1] 	= -1
-			g[1,2:]	= -self.ph
-			g[2:,0] = self.gh*self.npv['E']*self.grad_chi(self.utilde(x[0]))*self.grad_utilde(x[0])
-			g[2:,2:]= np.diag(np.ones(self.n))
-			return g
-		x,info,ier,msg = optimize.fsolve(f,np.append([self.npv['lambda'],self.npv['C']],self.npv['Eh']),fprime=grad,full_output=True)
+		# def grad(x):
+		# 	g = np.zeros([self.n+2,self.n+2])
+		# 	g[0,0] 	= 1
+		# 	g[0,1] 	= self.alpha*(self.alpha-1)*x[1]**(self.alpha-2)*(sum(x[2:])**(1-self.alpha))
+		# 	g[0,2:] = self.alpha*(1-self.alpha)*x[1]**(self.alpha-1)*(sum(x[2:])**(-self.alpha))
+		# 	g[1,0] 	= 0
+		# 	g[1,1] 	= -1
+		# 	g[1,2:]	= -self.ph
+		# 	g[2:,0] = self.gh*self.npv['E']*self.grad_chi(self.utilde(x[0]))*self.grad_utilde(x[0])
+		# 	g[2:,2:]= np.diag(np.ones(self.n))
+		# 	return g
+		x,info,ier,msg = optimize.fsolve(f,np.append([self.npv['lambda'],self.npv['C']],self.npv['Eh']),full_output=True)
 		print(msg)
 		self.fp = {}
 		self.fp['lambda'],self.fp['C'],self.fp['Eh'] = Logit.x2args(x)
@@ -148,9 +160,9 @@ class Logit:
 		self.fp['p'] = sum(self.ph*self.fp['Eh'])/self.fp['E']
 		self.fp['Eh_l'] = self.npv['Eh']*self.lower-self.eps
 		self.fp['Eh_u'] = self.npv['Eh']*self.upper+self.eps
-		self.fp['uhour'] = self.uhour(self.fp['Eh'])
+		self.fp['uhour'] = self.f_uh_sum(self.fp['Eh'])
 		self.fp['uscale'] = self.npv['uscale']
-		self.fp['u'] = self.u(self.fp['C'],self.fp['Eh'])
+		self.fp['u'] = self.f_u(self.fp['C'],self.fp['Eh'])
 
 	@staticmethod
 	def x2args(x):
@@ -256,6 +268,7 @@ class Logit:
 		elif self.sample=='gh':
 			self.gh = draw_gh(self.n,self.variance_g,self.seed)
 		self.p = sum(self.ph*self.gh)
+		self.pmin = min(self.ph)
 
 	def perturbed_samples(self,vec_variance):
 		try:
