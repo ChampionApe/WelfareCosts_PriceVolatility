@@ -100,7 +100,7 @@ class Logit:
 					self.f_uh_all = lambda Eh: self.f_uh_sum(Eh)+self.npv['uscale']
 					self.eh_demand = lambda lambda_,Eh: self.npv['Eh']*self.utilde(lambda_)
 				elif self.BP_Ref=='share':
-					self.f_uh_h = lambda Eh,gh: (1/self.sigma)*Eh*(np.log(gh*Eh))
+					self.f_uh_h = lambda Eh,gh: (1/self.sigma)*Eh*(np.log(gh/Eh))
 					self.f_uh_t = lambda Eh: (1/self.sigma)*sum(Eh)*np.log(sum(Eh))
 					self.f_uh_sum = lambda Eh: self.f_uh_t(Eh)+sum(self.f_uh_h(Eh,self.gh))
 					self.f_uh_all = lambda Eh: self.f_uh_sum(Eh)+self.npv['uscale']
@@ -174,87 +174,123 @@ class Logit:
 	#									 PLOTTING PROPERTIES:										#
 	#################################################################################################
 
-	def plots(self,plots):
+	def plots(self,plots,titles=None,return_fig=None):
 		"""
 		Wrapper around plot properties. Plots should be a list of plotting properties. 
 		"""
 		if isinstance(plots,str):
 			fig,axes = plt.subplots(1,1,figsize=(6,4))
 			plt.subplot(1,1,1)
-			eval('self.'+plots)
+			if titles:
+				eval('self.'+plots+'({a})'.format(a=titles))
+			else:
+				eval('self.'+plots+'()')
 		else:
+			if not titles:
+				titles = []
 			if len(plots)==1:
 				fig,axes = plt.subplots(1,1,figsize=(6,4))
 				plt.subplot(1,1,1)
-				eval('self.'+plots[0])
+				if plots[0] in titles:
+					eval('self.'+plots[0]+'({a})'.format(a=titles[plots[0]]))
+				else:
+					eval('self.'+plots[0]+'()')
 			else:
 				fig,axes = plt.subplots(round(len(plots)/2),2,figsize=(12,4*round(len(plots)/2)))
 				for i in range(len(plots)):
 					plt.subplot(round(len(plots)/2),2,i+1)
-					eval('self.'+plots[i])
+					if plots[i] in titles:
+						eval('self.'+plots[i]+'({a})'.format(a=titles[plots[i]]))
+					else:
+						eval('self.'+plots[i]+'()')
 		fig.tight_layout()
+		if return_fig:
+			return fig,axes
 
-	@property 
-	def plt_compare_eh(self):
+	def plt_compare_eh(self,add_title='standard'):
 		plt.plot(pd.Series(self.npv['Eh']).sort_values().reset_index(drop=True))
 		plt.plot(pd.Series(self.fp['Eh']).sort_values().reset_index(drop=True))
 		plt.xlabel('Hours of the year (sorted)', fontsize=13)
 		plt.ylabel('$E_h$', fontsize=13)
 		plt.legend(('$E_h$, constant prices', '$E_h$, flexible prices'), fontsize=13)
-		plt.title('Sorted hourly consumption with/without flexible prices', fontweight='bold',fontsize=16)
+		if add_title=='standard':
+			plt.title('Sorted hourly consumption with/without flexible prices', fontweight='bold',fontsize=16)
+		elif add_title:
+			plt.title(add_title,fontsize=13)
 
-	@property
-	def plt_ph(self):
+	def plt_ph(self, add_title='standard'):
 		plt.plot(pd.Series(self.ph).sort_values().reset_index(drop=True))
 		plt.xlabel('Hours of the year (sorted)', fontsize=13)
 		plt.ylabel(('Hourly prices'), fontsize=13)
-		plt.title('Sorted hourly prices', fontweight='bold',fontsize=16)
+		if add_title=='standard':
+			plt.title('Sorted hourly prices', fontweight='bold',fontsize=16)
+		elif add_title:
+			plt.title(add_title,fontsize=13)
 
-	@property 
-	def plt_gh(self):
+	def plt_gh(self, add_title='standard'):
 		plt.plot(pd.Series(self.gh).sort_values().reset_index(drop=True))
 		plt.xlabel('Hours of the year (sorted)', fontsize=13)
 		plt.ylabel(('Preferences $g_h$'), fontsize=13)
-		plt.title('Sorted hourly preferences', fontweight='bold',fontsize=16)
+		if add_title=='standard':
+			plt.title('Sorted hourly preferences', fontweight='bold',fontsize=16)
+		elif add_title:
+			plt.title(add_title,fontsize=13)
 
-	@property
-	def plt_eh_npv_gh(self):
+	def plt_eh_npv_gh(self, add_title='standard'):
 		plt.scatter(self.npv['Eh'],self.gh)
 		plt.xlabel('$E_h$ without flexible prices',fontsize=13)
 		plt.ylabel('Preferences $g_h$',fontsize=13)
-		plt.title('Hourly consumption/preferences (npv)', fontweight='bold', fontsize=16)
+		if add_title=='standard':
+			plt.title('Hourly consumption/preferences (npv)', fontweight='bold', fontsize=16)
+		elif add_title:
+			plt.title(add_title,fontsize=13)
 
-	@property
-	def plt_eh_npv_ph(self):
+	def plt_eh_npv_ph(self, add_title='standard'):
 		plt.scatter(self.npv['Eh'],self.ph)
 		plt.xlabel('$E_h$ without flexible prices',fontsize=13)
 		plt.ylabel('Hourly prices $p_h$',fontsize=13)
-		plt.title('Hourly consumption/prices (npv)', fontweight='bold', fontsize=16)
+		if add_title=='standard':
+			plt.title('Hourly consumption/prices (npv)', fontweight='bold', fontsize=16)
+		elif add_title:
+			plt.title(add_title,fontsize=13)
 
-	@property
-	def plt_eh_fp_gh(self):
+	def plt_eh_fp_gh(self,add_title='standard'):
 		plt.scatter(self.fp['Eh'],self.gh)
 		plt.xlabel('$E_h$, flexible prices',fontsize=13)
 		plt.ylabel('Preferences $g_h$',fontsize=13)
-		plt.title('Hourly consumption/preferences (fp)', fontweight='bold', fontsize=16)
+		if add_title=='standard':
+			plt.title('Hourly consumption/preferences (fp)', fontweight='bold', fontsize=16)
+		elif add_title:
+			plt.title(add_title,fontsize=13)
 
-	@property
-	def plt_eh_fp_ph(self):
+	def plt_eh_fp_ph(self,add_title='standard'):
 		plt.scatter(self.fp['Eh'],self.ph)
 		plt.xlabel('$E_h$, flexible prices',fontsize=13)
 		plt.ylabel('Hourly prices $p_h$',fontsize=13)
-		plt.title('Hourly consumption/prices (fp)', fontweight='bold', fontsize=16)
+		if add_title=='standard':
+			plt.title('Hourly consumption/prices (fp)', fontweight='bold', fontsize=16)
+		elif add_title:
+			plt.title(add_title,fontsize=13)
 
-	@property
-	def plt_uhour(self):
-		ehgrid = np.linspace(self.npv['Eh_l'][0]+0.00001,self.npv['Eh_u'][0]-0.00001,100)
-		uh = (1/self.sigma)*(ehgrid * np.log((1-self.lower)/(self.upper-1))-(ehgrid-self.npv['Eh_l'][0])*np.log(ehgrid-self.npv['Eh_l'][0])-(self.npv['Eh_u'][0]-ehgrid)*np.log(self.npv['Eh_u'][0]-ehgrid))
+	def plt_uhour(self,add_title='standard'):
+		ehgrid = np.linspace(self.npv['Eh_l'][0]+0.000000000001,self.npv['Eh_u'][0]-0.0000001,100)
+		if self.type=='Logit':
+			uh = (1/self.sigma)*(ehgrid * np.log((1-self.lower)/(self.upper-1))-(ehgrid-self.npv['Eh_l'][0])*np.log(ehgrid-self.npv['Eh_l'][0])-(self.npv['Eh_u'][0]-ehgrid)*np.log(self.npv['Eh_u'][0]-ehgrid))
+		if self.type=='MNL':
+			if self.BP_Ref=='level':
+				uh = self.f_uh(ehgrid,self.gh[0])
+			elif self.BP_Ref=='share':
+				Etgrid = np.array([self.npv['E']-self.npv['Eh'][0]+ehgrid[i] for i in range(len(ehgrid))])
+				uh = self.f_uh_h(ehgrid,self.gh[0])+(1/self.sigma)*Etgrid*np.log(Etgrid)
 		plt.plot(ehgrid,uh)
-		plt.axvline(x=self.gh[0]*self.npv['E'], color='k', linestyle='--', label='$g_hE_t^*$')
+		plt.axvline(x=self.gh[0]*self.npv['E'], color=colors[1], linestyle='--', label='$g_hE_t^*$')
 		plt.xlabel('$E_h$',fontsize=13)
 		plt.ylabel('$u^{hour}_h$',fontsize=13)
-		plt.legend(('$u_h^{hour}$', '$g_hE_t^*$'))
-		plt.title('Hourly utility component', fontweight='bold',fontsize=16)
+		plt.legend(('$u^{hour}_h$', '$g_hE_t^*$'),fontsize=13)
+		if add_title=='standard':
+			plt.title('Hourly utility component',fontweight='bold',fontsize=16)
+		elif add_title:
+			plt.title(add_title,fontsize=13)
 
 	#################################################################################################
 	#									 	SAMPLING METHODS:										#
